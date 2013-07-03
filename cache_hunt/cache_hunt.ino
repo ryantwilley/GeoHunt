@@ -42,7 +42,7 @@
 Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 
 #if (SSD1306_LCDHEIGHT != 32)
-#error("Height incorrect, please fix Adafruit_SSD1306.h!");
+#error(F("Height incorrect, please fix Adafruit_SSD1306.h!"));
 #endif
 
 // If using software serial, keep these lines enabled
@@ -50,50 +50,28 @@ Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 SoftwareSerial mySerial(GPS_TX, GPS_RX);
 Adafruit_GPS GPS(&mySerial);
 
-// Set GPSECHO to 'false' to turn off echoing the GPS data to the Serial console
-// Set to 'true' if you want to debug and listen to the raw GPS sentences. 
-#define GPSECHO  false
-// set to false to stop reporting current status for serial monitor
-#define REPORT_SERIAL false
+#define UPDATE_PERIOD 3500
 
-const int UPDATE_PERIOD = 3500;
-
-// distance from target
 float range = 3000.0;
-int targetsFound = 0;
+byte targetsFound = 0;
 int currentTarget = 0;
 
-#define NUM_TARGETS 2
+#define NUM_TARGETS 1
 #define FOUND_DISTANCE 250.0
 
-const char* TARGET_HINT[NUM_TARGETS] PROGMEM = {
-  "TEST1",
-  "Meet and Meter"
-  //"Dream Team Court",
-  //"Used to be fly",
-  //"Prep Walks",
-  //"And so it begins"
-};
-// todo: add all locations in order
+// todo: figure out how to fit all locations in memory
 LatLng* TARGETS[] = {
+  new LatLng(3011.247, 'N', 9204.2597, 'W'),    // home
   new LatLng(3013.286, 'N', 9202.661, 'W'),	// abdalla
   new LatLng(3012.683, 'N', 9200.939, 'W'),	// angelle practice field
-  //new LatLng(3012.75, 'N', 9202.284, 'W'),	// bourgeois hall
-  //new LatLng(3012.491, 'N', 9159.594, 'W'),	// airport
-  //new LatLng(3013.913, 'N', 9159.184, 'W'),	// catholic diocese
+  new LatLng(3012.75, 'N', 9202.284, 'W'),	// bourgeois hall
+  new LatLng(3012.491, 'N', 9159.594, 'W')	// airport
+  // new LatLng(3013.913, 'N', 9159.184, 'W')	// catholic diocese
   //new LatLng(3010.436, 'N', 9203.675, 'W')	// church
-  // new LatLng(3011.247, 'N', 9204.2597, 'W')	// home
 };
 
   // flags to switch what gets shown on oled
-boolean showGpsPosition = false;
-boolean showCalculatedPosition = true;
-
-// this keeps track of whether we're using the interrupt
-// off by default!
-// todo: try interrupt
-boolean usingInterrupt = false;
-void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
+#define SHOW_GPS_POSITION 0
 
 // -------- audio part -----------------
 
@@ -104,43 +82,38 @@ void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
 #define MELODY_LENGTH 7
 
 // notes in the melody (can i kick it?)
-int melody[] = {
-  NOTE_G2, 0, NOTE_G2, 0, NOTE_A2, 0, NOTE_C3};
-
+int melody[] PROGMEM = {  NOTE_G2, 0, NOTE_G2, 0, NOTE_A2, 0, NOTE_C3};
 // note durations
-int noteDurations[] = { 
-  2, 4, 4, 8, 2, 4, 4 };
+int noteDurations[] PROGMEM = { 2, 4, 4, 8, 2, 4, 3 };
 
 void playMelody();
 // -------- end audio part -----------------
 
 // ---- servo stuff ---------
 int servoPwm = 0;
-int lockedPosition = 90;    // servo angle for locked box
-int openPosition = 180;	 // servo angle for unlocked box
+byte lockedPosition = 90;    // servo angle for locked box
+byte openPosition = 180;	 // servo angle for unlocked box
 
-void setServoAngle(int);
+void setServoAngle(byte);
 // ---- end servo stuff -----
 
 void setup()  
 {
 
-  if(REPORT_SERIAL) {
-    // connect at 115200 so we can read the GPS fast enough and echo without dropping chars
-    // also spit it out
-    Serial.begin(115200);
-    Serial.println(F("Adafruit GPS library basic test!"));
-  }
-
   // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
   display.begin(SSD1306_SWITCHCAPVCC);
   // init done
 
-  // todo: add instructions?
-  // display.display(); // show splashscreen
-
   display.setTextSize(1);
   display.setTextColor(WHITE);
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println(F("Ok, here we go!"));
+  display.println(F("Find 5 places "));
+  display.println(F("from our past to"));
+  display.println(F("open this box..."));
+  display.display();
 
   // 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
   GPS.begin(9600);
@@ -160,54 +133,18 @@ void setup()
   // Request updates on antenna status, comment out to keep quiet
   GPS.sendCommand(PGCMD_ANTENNA);
 
-  // the nice thing about this code is you can have a timer0 interrupt go off
-  // every 1 millisecond, and read data from the GPS for you. that makes the
-  // loop code a heck of a lot easier!
-  useInterrupt(true);
+  // just force the conversion every loop
+  TIMSK0 &= ~_BV(OCIE0A);
 
-  // pinMode(SERVO_CNTRL, OUTPUT);
-
-  delay(1000);
+  pinMode(SERVO_CNTRL, OUTPUT);
   
-  playMelody();
-
   // lock box
-  // setServoAngle(lockedPosition);    
+  setServoAngle(lockedPosition);
+
+  delay(2500);
 
   // Ask for firmware version
   mySerial.println(PMTK_Q_RELEASE);
-}
-
-
-// Interrupt is called once a millisecond, looks for any new GPS data, and stores it
-SIGNAL(TIMER0_COMPA_vect) {
-  char c = GPS.read();
-
-  // if you want to debug, this is a good time to do it!
-#ifdef UDR0
-  if (GPSECHO)
-    if (c) UDR0 = c;  
-  // writing direct to UDR0 is much much faster than Serial.print 
-  // but only one character can be written at a time. 
-#endif
-}
-
-// todo: hardwire this?
-void useInterrupt(boolean v) {
-  if (v) {
-
-    // Timer0 is already used for millis() - we'll just interrupt somewhere
-    // in the middle and call the "Compare A" function above
-    OCR0A = 0x1F;
-
-    TIMSK0 |= _BV(OCIE0A);
-    usingInterrupt = true;
-  } 
-  else {
-    // do not call the interrupt function COMPA anymore
-    TIMSK0 &= ~_BV(OCIE0A);
-    usingInterrupt = false;
-  }
 }
 
 // play a short tune to indicate that a location has been discovered
@@ -232,8 +169,8 @@ void playMelody () {
   }
 }
 
-void setServoAngle(int changeAngle) {
-  for (int angle = 0; changeAngle <= 140; angle += 5)  {
+void setServoAngle(byte changeAngle) {
+  for (int angle = 0; angle <= changeAngle; angle += 5)  {
     servoPwm = (angle*11) + 500;      // Convert angle to microseconds
     digitalWrite(SERVO_CNTRL, HIGH);
     delayMicroseconds(servoPwm);
@@ -243,27 +180,17 @@ void setServoAngle(int changeAngle) {
 }
 
 uint32_t timer = millis();
-// string used to print to oled monitor
-char locString[16];
-// string used to format latitude
-char latString[7];
-// string used to format longitude
-char lonString[7];
 
 void loop()
 {
   // in case you are not using the interrupt above, you'll
   // need to 'hand query' the GPS, not suggested :(
-  if (! usingInterrupt) {
-    // read data from the GPS in the 'main loop'
-    char c = GPS.read();
-    // if you want to debug, this is a good time to do it!
-    if (GPSECHO && REPORT_SERIAL)
-      if (c) Serial.print(c);
-  }
+  // read data from the GPS in the 'main loop'
+  char c = GPS.read();
 
   // if a sentence is received, we can check the checksum, parse it...
-  if (GPS.newNMEAreceived()) {
+  if (GPS.newNMEAreceived()) 
+  {
 
     // a tricky thing here is if we print the NMEA sentence, or data
     // we end up not listening and catching other sentences! 
@@ -277,131 +204,112 @@ void loop()
   if (timer > millis())  timer = millis();
 
   // approximately every 2 seconds or so, print out the current stats
-  if (millis() - timer > UPDATE_PERIOD) { 
+  if (millis() - timer > UPDATE_PERIOD) 
+  { 
     timer = millis(); // reset the timer
 
-    if(REPORT_SERIAL) {
-      Serial.print(F("\nTime: "));
-      Serial.print(GPS.hour, DEC); 
-      Serial.print(':');
-      Serial.print(GPS.minute, DEC); 
-      Serial.print(':');
-      Serial.print(GPS.seconds, DEC); 
-      Serial.print('.');
-      Serial.println(GPS.milliseconds);
-      Serial.print(F("Date: "));
-      Serial.print(GPS.day, DEC); 
-      Serial.print('/');
-      Serial.print(GPS.month, DEC); 
-      Serial.print("/20");
-      Serial.println(GPS.year, DEC);
-      Serial.print(F("Fix: ")); 
-      Serial.print((int)GPS.fix);
-      Serial.print(F(" quality: ")); 
-      Serial.println((int)GPS.fixquality); 
-    }
     // if we have good info and we haven't reached the end of our search, keep checking
-    if (GPS.fix && (targetsFound != NUM_TARGETS)) {
-
-      if(REPORT_SERIAL) {
-        Serial.print(F("Location: "));
-        Serial.print(GPS.latitude, 4); 
-        Serial.print(GPS.lat);
-        Serial.print(F(", ")); 
-        Serial.print(GPS.longitude, 4); 
-        Serial.println(GPS.lon);
-
-        Serial.print(F("Speed (knots): ")); 
-        Serial.println(GPS.speed);
-        Serial.print(F("Angle: ")); 
-        Serial.println(GPS.angle);
-        Serial.print(F("Altitude: ")); 
-        Serial.println(GPS.altitude);
-        Serial.print(F("Satellites: ")); 
-        Serial.println((int)GPS.satellites);
-      }
-
+    if (GPS.fix && (targetsFound < NUM_TARGETS)) 
+    {
       LatLng* current = new LatLng(GPS.latitude, GPS.lat, GPS.longitude, GPS.lon);
-      LatLng* trgt = TARGETS[currentTarget];
-
-      if(showGpsPosition) {
-        display.clearDisplay();
-        display.setCursor(0, 0);
-
-        dtostrf(current->getLatitude(), 5, 2, latString);
-        dtostrf(current->getLongitude(), 5, 2, lonString);
-        sprintf(locString, "%s: %s%c %s%c", "H", latString, current->getLatDir(), lonString, current->getLngDir());
-        display.println(locString);
-
-        dtostrf(trgt->getLatitude(), 5, 2, latString);
-        dtostrf(trgt->getLongitude(), 5, 2, lonString);
-        sprintf(locString, "%s: %s%c %s%c", "H", latString, trgt->getLatDir(), lonString, trgt->getLngDir());
-        display.println(locString);
-
-        display.display();
-      }
-
-      range = current->gcDistanceFrom(trgt);
-      if(range < FOUND_DISTANCE) {
-
-        playMelody();
-
-        targetsFound++;
-        currentTarget++;
-
-        if(targetsFound == NUM_TARGETS) {
-
-          display.clearDisplay();
-          display.setCursor(0, 0);
-          display.println(F("Congratulations!"));
-          display.println(F("Happy Early Anniversary!"));
-          display.display();
-
-          setServoAngle(openPosition);    
-
-          // todo: play winning sound
-
-          // todo: open the box
-        }
-      } 
-      else {
-        if(showCalculatedPosition) {
-          display.clearDisplay();
-          display.setCursor(0, 0);
-          display.println(TARGET_HINT[currentTarget]);	// line 1
-          display.print(F("Looking for "));
-          display.print(currentTarget + 1);
-          display.print(F(" of "));
-          display.println(NUM_TARGETS); // line 2
-
-          display.print(F("Range: ")); 
-          display.println(range); // line 3
-
-#if CHECK_MEMORY_USE
-          display.print(F("Mem=")); // line 4?
-          display.println(freeMemory());
-#endif
-
-          display.display();
-        }
-      }
-
-      free(current);
-      free(trgt);
-    }
-    else {
+  
+#if SHOW_GPS_POSITION
       display.clearDisplay();
       display.setCursor(0, 0);
-      display.println(F("Take me outside!"));
+  
+      display.print(current->getLatitude());
+      display.print(current->getLatDir());
+      display.print(F(" "));
+      display.print(current->getLongitude());
+      display.println(current->getLngDir());
+      
+      display.print(TARGETS[currentTarget]->getLatitude());
+      display.print(TARGETS[currentTarget]->getLatDir());
+      display.print(F(" "));
+      display.print(TARGETS[currentTarget]->getLongitude());
+      display.println(TARGETS[currentTarget]->getLngDir());
       
 #if CHECK_MEMORY_USE
       display.print(F("Mem=")); // line 2?
       display.println(freeMemory());
 #endif
-
-      // todo: show antenna level? num satellites?
-
+  
       display.display();
+#else
+  
+      range = current->gcDistanceFrom(TARGETS[currentTarget]);
+      
+      if(range > 0 && range < FOUND_DISTANCE) 
+      {
+  
+        playMelody();
+  
+        targetsFound++;
+        currentTarget++;
+  
+        if(targetsFound == NUM_TARGETS) 
+        {
+          display.clearDisplay();
+          display.setCursor(0, 0);
+          display.println(F("Congratulations!"));
+          display.println(F("Here's to a great"));
+          display.println(F("2 years!"));
+          display.println(F("ANR so far..."));
+          display.display();
+  
+          setServoAngle(openPosition);    
+  
+          // todo: play winning sound
+        }
+      } 
+      else 
+      {
+          display.clearDisplay();
+          display.setCursor(0, 0);
+          display.print(F("Looking for "));
+          display.print(currentTarget + 1);
+          display.print(F(" of "));
+          display.println(NUM_TARGETS); // line 1
+  
+          display.print(F("Range: ")); 
+          display.println(range); // line 2
+          
+          display.print(F("Satellites:"));
+          display.println((int)GPS.satellites);  // line 3
+  
+#if CHECK_MEMORY_USE
+          display.print(F("Mem=")); // line 4?
+          display.println(freeMemory());
+#endif
+  
+          display.display();
+      }
+#endif
+      
+      free(current);
+
+    }
+    else 
+    {
+      if(targetsFound < NUM_TARGETS) 
+      {
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.println(F("Take me outside!"));
+        
+#if CHECK_MEMORY_USE
+        display.print(F("Mem=")); // line 2?
+        display.println(freeMemory());
+#endif
+        display.print(F("Satellites:"));
+        display.println((int)GPS.satellites);
+    
+        display.display();
+      }
+      else 
+      {
+        // todo: keep playing victory sound?
+      }
     }
   }
 }
