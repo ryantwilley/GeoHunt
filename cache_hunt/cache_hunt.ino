@@ -12,8 +12,6 @@
 #include <Adafruit_SSD1306.h>
 #include <LatLng.h>
 
-#include <Servo.h>
-
 #define CHECK_MEMORY_USE 1
 
 #if CHECK_MEMORY_USE
@@ -56,18 +54,15 @@ float range = 3000.0;
 byte targetsFound = 0;
 int currentTarget = 0;
 
-#define NUM_TARGETS 1
-#define FOUND_DISTANCE 250.0
+#define NUM_TARGETS 4
+#define FOUND_DISTANCE 200.0
 
 // todo: figure out how to fit all locations in memory
 LatLng* TARGETS[] = {
-  new LatLng(3011.247, 'N', 9204.2597, 'W'),    // home
-  new LatLng(3013.286, 'N', 9202.661, 'W'),	// abdalla
-  new LatLng(3012.683, 'N', 9200.939, 'W'),	// angelle practice field
-  new LatLng(3012.75, 'N', 9202.284, 'W'),	// bourgeois hall
-  new LatLng(3012.491, 'N', 9159.594, 'W')	// airport
-  // new LatLng(3013.913, 'N', 9159.184, 'W')	// catholic diocese
-  //new LatLng(3010.436, 'N', 9203.675, 'W')	// church
+  new LatLng(3011.822, 'N', 9204.486, 'W'),    // c.c.'s
+  new LatLng(3010.901, 'N', 9204.856, 'W'),    // dance
+  new LatLng(3010.655, 'N', 9204.769, 'W'),    // ivy (petsmart?)
+  new LatLng(3010.436, 'N', 9203.675, 'W')    // church
 };
 
   // flags to switch what gets shown on oled
